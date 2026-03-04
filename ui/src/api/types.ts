@@ -111,40 +111,25 @@ export interface CronJob {
 
 // ==================== Trading ====================
 
-export interface CryptoAccount {
-  balance: number
-  totalMargin: number
-  unrealizedPnL: number
-  equity: number
-  realizedPnL: number
-  totalPnL: number
+export interface TradingAccount {
+  id: string
+  provider: string
+  label: string
 }
 
-export interface CryptoPosition {
-  symbol: string
-  side: 'long' | 'short'
-  size: number
-  entryPrice: number
-  leverage: number
-  margin: number
-  liquidationPrice?: number
-  markPrice: number
-  unrealizedPnL: number
-  positionValue: number
-}
-
-export interface SecAccount {
+export interface AccountInfo {
   cash: number
-  portfolioValue: number
   equity: number
-  buyingPower: number
   unrealizedPnL: number
   realizedPnL: number
-  dayTradeCount: number
+  portfolioValue?: number
+  buyingPower?: number
+  totalMargin?: number
+  dayTradeCount?: number
 }
 
-export interface SecHolding {
-  symbol: string
+export interface Position {
+  contract: { aliceId?: string; symbol?: string; secType?: string; exchange?: string; currency?: string }
   side: 'long' | 'short'
   qty: number
   avgEntryPrice: number
@@ -153,6 +138,9 @@ export interface SecHolding {
   unrealizedPnL: number
   unrealizedPnLPercent: number
   costBasis: number
+  leverage: number
+  margin?: number
+  liquidationPrice?: number
 }
 
 export interface WalletCommitLog {

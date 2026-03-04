@@ -111,7 +111,7 @@ const NAV_ITEMS: NavItem[] = [
   },
   {
     prefix: 'trading',
-    label: 'Crypto',
+    label: 'Trading',
     icon: (active) => (
       <svg width="18" height="18" viewBox="0 0 24 24" fill={active ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
         <path d="M2 20h20" />
@@ -122,22 +122,8 @@ const NAV_ITEMS: NavItem[] = [
       </svg>
     ),
     children: [
-      { page: 'trading/connection', label: 'Connection' },
+      { page: 'trading/accounts', label: 'Accounts' },
       { page: 'trading/guards', label: 'Guards' },
-    ],
-  },
-  {
-    prefix: 'securities',
-    label: 'Securities',
-    icon: (active) => (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill={active ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-        <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
-        <polyline points="17 6 23 6 23 12" />
-      </svg>
-    ),
-    children: [
-      { page: 'securities/connection', label: 'Connection' },
-      { page: 'securities/guards', label: 'Guards' },
     ],
   },
   {

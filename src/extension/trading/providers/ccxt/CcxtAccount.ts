@@ -84,7 +84,7 @@ export class CcxtAccount implements ITradingAccount {
       apiKey: config.apiKey,
       secret: config.apiSecret,
       password: config.password,
-      options: config.options,
+      ...(config.options ? { options: config.options } : {}),
     })
 
     if (config.sandbox) {
