@@ -27,8 +27,7 @@ import { OpenBBCurrencyClient } from './openbb/currency/index.js'
 import { OpenBBEconomyClient } from './openbb/economy/index.js'
 import { OpenBBCommodityClient } from './openbb/commodity/index.js'
 import { OpenBBNewsClient } from './openbb/news/index.js'
-import { createCryptoTools } from './extension/crypto/index.js'
-import { createCurrencyTools } from './extension/currency/index.js'
+import { createMarketSearchTools } from './extension/market/index.js'
 import { createNewsTools } from './extension/news/index.js'
 import { createAnalysisTools } from './extension/analysis-kit/index.js'
 import { SessionStore } from './core/session.js'
@@ -219,9 +218,8 @@ async function main() {
   toolCenter.register(createBrainTools(brain), 'brain')
   toolCenter.register(createBrowserTools(), 'browser')
   toolCenter.register(createCronTools(cronEngine), 'cron')
-  toolCenter.register(createEquityTools(symbolIndex, equityClient), 'equity')
-  toolCenter.register(createCryptoTools(cryptoClient), 'crypto-data')
-  toolCenter.register(createCurrencyTools(currencyClient), 'currency-data')
+  toolCenter.register(createMarketSearchTools(symbolIndex, cryptoClient, currencyClient), 'market-search')
+  toolCenter.register(createEquityTools(equityClient), 'equity')
   let newsTools = createNewsTools(newsClient, {
     companyProvider: providers.newsCompany,
     worldProvider: providers.newsWorld,

@@ -1,14 +1,6 @@
 /**
  * Equity AI Tools
  *
- * equitySearch:
- *   为了实现正则搜索，我们在启动时从 OpenBB API 拉取全量 symbol 列表并缓存到
- *   data/cache/equity/symbols.json。搜索在本地内存中进行，不依赖 API。
- *   当前缓存的数据源（免费，不需要 API key）：
- *   - SEC (sec): ~10,000 美股上市公司，来自 SEC EDGAR
- *   - TMX (tmx): ~3,600 加拿大上市公司，来自多伦多交易所
- *   扩展方法：在 SymbolIndex 的 SOURCES 数组中添加新的 provider 即可。
- *
  * equityGetProfile / equityGetFinancials / equityGetRatios / equityGetEstimates /
  * equityGetEarningsCalendar / equityGetInsiderTrading / equityDiscover:
  *   透传到 OpenBB equity API，为 AI 提供基本面和市场发现能力。
@@ -16,40 +8,17 @@
 
 import { tool } from 'ai'
 import { z } from 'zod'
-import type { SymbolIndex } from '@/openbb/equity/SymbolIndex'
 import type { OpenBBEquityClient } from '@/openbb/equity/client'
 
-export function createEquityTools(symbolIndex: SymbolIndex, equityClient: OpenBBEquityClient) {
+export function createEquityTools(equityClient: OpenBBEquityClient) {
   return {
-    equitySearch: tool({
-      description: `Search for equity symbols by regex pattern or keyword.
-
-Matches against both ticker symbol and company name (case-insensitive).
-Supports full regex syntax: "^BRK\\." for BRK.A/BRK.B, "semiconductor" for all semiconductor companies, "^AA" for all tickers starting with AA.
-
-If the regex is invalid, falls back to simple substring matching.
-
-Use this FIRST to find the correct symbol before querying any equity data.`,
-      inputSchema: z.object({
-        pattern: z.string().describe('Regex pattern or keyword to match against symbol and company name'),
-        limit: z.number().int().positive().optional().describe('Max results to return (default: 20)'),
-      }),
-      execute: ({ pattern, limit }) => {
-        const results = symbolIndex.search(pattern, limit)
-        if (results.length === 0) {
-          return { results: [], message: `No symbols matching "${pattern}". Try a broader pattern.` }
-        }
-        return { results, count: results.length }
-      },
-    }),
-
     equityGetProfile: tool({
       description: `Get company profile and key valuation metrics for a stock.
 
 Returns company overview (name, sector, industry, description, website, CEO, employees)
 combined with key metrics (market cap, PE ratio, PB ratio, EV/EBITDA, dividend yield, etc.).
 
-Use equitySearch first to resolve the correct symbol.`,
+If unsure about the symbol, use marketSearchForResearch to find it.`,
       inputSchema: z.object({
         symbol: z.string().describe('Ticker symbol, e.g. "AAPL", "MSFT"'),
       }),
@@ -68,7 +37,7 @@ Use equitySearch first to resolve the correct symbol.`,
 Returns income statement, balance sheet, or cash flow statement depending on the "type" parameter.
 Each entry is one fiscal period (quarterly or annual).
 
-Use equitySearch first to resolve the correct symbol.`,
+If unsure about the symbol, use marketSearchForResearch to find it.`,
       inputSchema: z.object({
         symbol: z.string().describe('Ticker symbol, e.g. "AAPL"'),
         type: z.enum(['income', 'balance', 'cash']).describe('Statement type: "income" for income statement, "balance" for balance sheet, "cash" for cash flow'),
@@ -98,7 +67,7 @@ Returns profitability ratios (ROE, ROA, gross margin, net margin, operating marg
 liquidity ratios (current ratio, quick ratio), leverage ratios (debt/equity),
 and efficiency ratios (asset turnover, inventory turnover).
 
-Use equitySearch first to resolve the correct symbol.`,
+If unsure about the symbol, use marketSearchForResearch to find it.`,
       inputSchema: z.object({
         symbol: z.string().describe('Ticker symbol, e.g. "AAPL"'),
         period: z.enum(['annual', 'quarter']).optional().describe('Fiscal period (default: annual)'),
@@ -118,7 +87,7 @@ Use equitySearch first to resolve the correct symbol.`,
 Returns consensus rating (buy/hold/sell counts), average target price, and EPS estimates.
 Useful for understanding how the market views a stock's prospects.
 
-Use equitySearch first to resolve the correct symbol.`,
+If unsure about the symbol, use marketSearchForResearch to find it.`,
       inputSchema: z.object({
         symbol: z.string().describe('Ticker symbol, e.g. "AAPL"'),
       }),
@@ -154,7 +123,7 @@ Can be queried by symbol (specific company) or by date range (market-wide).`,
 Returns recent buy/sell transactions by company executives, directors, and major shareholders.
 Insider buying is often a strong bullish signal; large insider selling may warrant caution.
 
-Use equitySearch first to resolve the correct symbol.`,
+If unsure about the symbol, use marketSearchForResearch to find it.`,
       inputSchema: z.object({
         symbol: z.string().describe('Ticker symbol, e.g. "AAPL"'),
         limit: z.number().int().positive().optional().describe('Number of transactions to return (default: 20)'),
