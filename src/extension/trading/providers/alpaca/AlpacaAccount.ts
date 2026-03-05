@@ -76,6 +76,19 @@ interface AlpacaSnapshotRaw {
   DailyBar: { Volume: number }
 }
 
+interface AlpacaFillActivityRaw {
+  activity_type: 'FILL'
+  symbol: string
+  side: string
+  qty: string
+  price: string
+  cum_qty: string
+  leaves_qty: string
+  transaction_time: string
+  order_id: string
+  type: string // 'fill' | 'partial_fill'
+}
+
 interface AlpacaClockRaw {
   is_open: boolean
   next_open: string
@@ -92,6 +105,10 @@ export class AlpacaAccount implements ITradingAccount {
 
   private client!: InstanceType<typeof Alpaca>
   private readonly config: AlpacaAccountConfig
+
+  /** Cached realized PnL from FILL activities (FIFO lot matching) */
+  private realizedPnLCache: { value: number; updatedAt: number } | null = null
+  private static readonly REALIZED_PNL_TTL_MS = 60_000
 
   constructor(config: AlpacaAccountConfig) {
     this.config = config
@@ -254,17 +271,20 @@ export class AlpacaAccount implements ITradingAccount {
   // ---- Queries ----
 
   async getAccount(): Promise<AccountInfo> {
-    const account = await this.client.getAccount() as AlpacaAccountRaw
+    const [account, positions, realizedPnL] = await Promise.all([
+      this.client.getAccount() as Promise<AlpacaAccountRaw>,
+      this.client.getPositions() as Promise<AlpacaPositionRaw[]>,
+      this.getRealizedPnL(),
+    ])
 
     // Alpaca account API doesn't provide unrealizedPnL — aggregate from positions
-    const positions = await this.client.getPositions() as AlpacaPositionRaw[]
     const unrealizedPnL = positions.reduce((sum, p) => sum + parseFloat(p.unrealized_pl), 0)
 
     return {
       cash: parseFloat(account.cash),
       equity: parseFloat(account.equity),
       unrealizedPnL,
-      realizedPnL: 0, // Alpaca account API doesn't provide this; tracked by TradingGit
+      realizedPnL,
       portfolioValue: parseFloat(account.portfolio_value),
       buyingPower: parseFloat(account.buying_power),
       dayTradeCount: account.daytrade_count,
@@ -336,6 +356,113 @@ export class AlpacaAccount implements ITradingAccount {
       nextClose: new Date(clock.next_close),
       timestamp: new Date(clock.timestamp),
     }
+  }
+
+  // ==================== Realized PnL (FILL activities, FIFO) ====================
+
+  /**
+   * Get realized PnL from Alpaca FILL activities with TTL cache.
+   * Fetches all historical fills, matches buys against sells per symbol using FIFO,
+   * and sums the realized profit/loss.
+   */
+  private async getRealizedPnL(): Promise<number> {
+    const now = Date.now()
+    if (this.realizedPnLCache && (now - this.realizedPnLCache.updatedAt) < AlpacaAccount.REALIZED_PNL_TTL_MS) {
+      return this.realizedPnLCache.value
+    }
+
+    try {
+      const fills = await this.fetchAllFills()
+      const value = AlpacaAccount.computeRealizedPnL(fills)
+      this.realizedPnLCache = { value, updatedAt: now }
+      return value
+    } catch (err) {
+      // On error, return cached value if available, otherwise 0
+      console.warn(`AlpacaAccount[${this.id}]: failed to fetch FILL activities:`, err)
+      return this.realizedPnLCache?.value ?? 0
+    }
+  }
+
+  /** Paginate through all FILL activities (newest first by default). */
+  private async fetchAllFills(): Promise<AlpacaFillActivityRaw[]> {
+    const all: AlpacaFillActivityRaw[] = []
+    let pageToken: string | undefined
+
+    for (;;) {
+      const page = await this.client.getAccountActivities({
+        activityTypes: 'FILL',
+        pageSize: 100,
+        pageToken,
+        direction: 'asc', // oldest first → natural FIFO order
+        until: undefined,
+        after: undefined,
+        date: undefined,
+      }) as AlpacaFillActivityRaw[]
+
+      if (!page || page.length === 0) break
+      all.push(...page)
+
+      // Alpaca pagination: last item's id is the next page_token
+      if (page.length < 100) break
+      pageToken = (page[page.length - 1] as unknown as { id: string }).id
+    }
+
+    return all
+  }
+
+  /**
+   * FIFO lot matching: track buy lots per symbol, realize PnL on sells.
+   * Handles both long-only and short-selling (sell before buy → short lots).
+   */
+  static computeRealizedPnL(fills: AlpacaFillActivityRaw[]): number {
+    // Per-symbol FIFO queue: { qty, price }[]
+    // Positive qty = long lot, negative qty = short lot
+    const lots = new Map<string, Array<{ qty: number; price: number }>>()
+    let totalRealized = 0
+
+    for (const fill of fills) {
+      const symbol = fill.symbol
+      const price = parseFloat(fill.price)
+      const qty = parseFloat(fill.qty)
+      const isBuy = fill.side === 'buy'
+
+      if (!lots.has(symbol)) lots.set(symbol, [])
+      const queue = lots.get(symbol)!
+
+      // Determine if this fill opens or closes
+      // Opening: buy when no short lots (or queue empty), sell when no long lots
+      // Closing: buy against short lots, sell against long lots
+      let remaining = qty
+
+      while (remaining > 0 && queue.length > 0) {
+        const front = queue[0]
+        const isClosing = isBuy ? front.qty < 0 : front.qty > 0
+
+        if (!isClosing) break // Same direction → this fill opens new lots
+
+        const matchQty = Math.min(remaining, Math.abs(front.qty))
+
+        if (front.qty > 0) {
+          // Closing long: sell at `price`, entry was `front.price`
+          totalRealized += matchQty * (price - front.price)
+        } else {
+          // Closing short: buy at `price`, entry was `front.price`
+          totalRealized += matchQty * (front.price - price)
+        }
+
+        remaining -= matchQty
+        front.qty += isBuy ? matchQty : -matchQty // shrink lot toward 0
+
+        if (Math.abs(front.qty) < 1e-10) queue.shift() // lot fully consumed
+      }
+
+      // Remaining qty opens new lots
+      if (remaining > 0) {
+        queue.push({ qty: isBuy ? remaining : -remaining, price })
+      }
+    }
+
+    return Math.round(totalRealized * 100) / 100 // round to cents
   }
 
   // ==================== Internal ====================

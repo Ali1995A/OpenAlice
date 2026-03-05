@@ -1,23 +1,31 @@
 import { useState, useEffect, useCallback } from 'react'
-import { api, type AccountInfo, type Position, type WalletCommitLog } from '../api'
+import { api, type Position, type WalletCommitLog } from '../api'
 
 // ==================== Types ====================
+
+interface AggregatedEquity {
+  totalEquity: number
+  totalCash: number
+  totalUnrealizedPnL: number
+  totalRealizedPnL: number
+  accounts: Array<{ id: string; label: string; equity: number; cash: number }>
+}
 
 interface AccountData {
   id: string
   provider: string
   label: string
-  info: AccountInfo | null
   positions: Position[]
   walletLog: WalletCommitLog[]
   error?: string
 }
 
 interface PortfolioData {
+  equity: AggregatedEquity | null
   accounts: AccountData[]
 }
 
-const EMPTY: PortfolioData = { accounts: [] }
+const EMPTY: PortfolioData = { equity: null, accounts: [] }
 
 // ==================== Page ====================
 
@@ -42,13 +50,19 @@ export function PortfolioPage() {
     return () => clearInterval(interval)
   }, [refresh])
 
-  const hasAccounts = data.accounts.some(a => a.info)
   const allPositions = data.accounts.flatMap(a =>
-    a.positions.map(p => ({ ...p, accountLabel: a.label, accountProvider: a.provider }))
+    a.positions.map(p => ({ ...p, accountLabel: a.label, accountProvider: a.provider })),
   )
   const allWalletLogs = data.accounts.flatMap(a =>
-    a.walletLog.map(c => ({ ...c, accountLabel: a.label, accountProvider: a.provider }))
+    a.walletLog.map(c => ({ ...c, accountLabel: a.label, accountProvider: a.provider })),
   )
+
+  // Merge equity per-account data with provider info + per-account unrealizedPnL from positions
+  const accountSources = (data.equity?.accounts ?? []).map(eq => {
+    const acct = data.accounts.find(a => a.id === eq.id)
+    const unrealizedPnL = acct?.positions.reduce((sum, p) => sum + p.unrealizedPnL, 0) ?? 0
+    return { ...eq, provider: acct?.provider ?? '', unrealizedPnL, error: acct?.error }
+  })
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
@@ -78,30 +92,28 @@ export function PortfolioPage() {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto px-4 md:px-6 py-5">
-        <div className="max-w-[900px] space-y-6">
-          {/* Account Summary Cards */}
-          {data.accounts.length > 0 && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {data.accounts.map(acct => (
-                <AccountCard key={acct.id} account={acct} />
-              ))}
-            </div>
+        <div className="max-w-[900px] space-y-5">
+          <HeroMetrics equity={data.equity} />
+
+          {accountSources.length > 0 && (
+            <AccountStrip sources={accountSources} />
           )}
 
-          {/* Positions */}
           {allPositions.length > 0 && (
             <PositionsTable positions={allPositions} />
           )}
 
-          {/* Empty state */}
-          {!hasAccounts && !loading && (
+          {/* Empty states */}
+          {data.accounts.length === 0 && !loading && (
             <div className="text-center py-12 text-text-muted">
               <p className="text-sm">No trading accounts connected.</p>
               <p className="text-[12px] mt-1">Configure connections in the Trading page.</p>
             </div>
           )}
+          {data.accounts.length > 0 && allPositions.length === 0 && !loading && (
+            <p className="text-center py-8 text-[13px] text-text-muted">No open positions.</p>
+          )}
 
-          {/* Wallet Logs (trade history) */}
           {allWalletLogs.length > 0 && (
             <TradeLog commits={allWalletLogs} />
           )}
@@ -115,72 +127,93 @@ export function PortfolioPage() {
 
 async function fetchPortfolioData(): Promise<PortfolioData> {
   try {
-    const { accounts } = await api.trading.listAccounts()
-    const results = await Promise.all(
-      accounts.map(async (acct): Promise<AccountData> => {
+    const [equityResult, accountsResult] = await Promise.allSettled([
+      api.trading.equity(),
+      api.trading.listAccounts(),
+    ])
+
+    const equity = equityResult.status === 'fulfilled' ? equityResult.value : null
+    const accountsList = accountsResult.status === 'fulfilled' ? accountsResult.value.accounts : []
+
+    const accounts = await Promise.all(
+      accountsList.map(async (acct): Promise<AccountData> => {
         try {
-          const [info, posResp, logResp] = await Promise.all([
-            api.trading.accountInfo(acct.id),
+          const [posResp, logResp] = await Promise.all([
             api.trading.positions(acct.id),
             api.trading.walletLog(acct.id, 10),
           ])
-          return { ...acct, info, positions: posResp.positions, walletLog: logResp.commits }
+          return { ...acct, positions: posResp.positions, walletLog: logResp.commits }
         } catch {
-          return { ...acct, info: null, positions: [], walletLog: [], error: 'Not connected' }
+          return { ...acct, positions: [], walletLog: [], error: 'Not connected' }
         }
-      })
+      }),
     )
-    return { accounts: results }
+
+    return { equity, accounts }
   } catch {
-    return { accounts: [] }
+    return EMPTY
   }
 }
 
-// ==================== Account Card ====================
+// ==================== Hero Metrics ====================
+
+function HeroMetrics({ equity }: { equity: AggregatedEquity | null }) {
+  if (!equity) {
+    return (
+      <div className="border border-border rounded-lg bg-bg-secondary p-5 text-center">
+        <p className="text-[13px] text-text-muted">Unable to load portfolio data.</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="border border-border rounded-lg bg-bg-secondary p-5">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <HeroItem label="Total Equity" value={fmt(equity.totalEquity)} />
+        <HeroItem label="Cash" value={fmt(equity.totalCash)} />
+        <HeroItem label="Unrealized PnL" value={fmtPnl(equity.totalUnrealizedPnL)} pnl={equity.totalUnrealizedPnL} />
+        <HeroItem label="Realized PnL" value={fmtPnl(equity.totalRealizedPnL)} pnl={equity.totalRealizedPnL} />
+      </div>
+    </div>
+  )
+}
+
+function HeroItem({ label, value, pnl }: { label: string; value: string; pnl?: number }) {
+  const color = pnl == null ? 'text-text' : pnl >= 0 ? 'text-green' : 'text-red'
+  return (
+    <div>
+      <p className="text-[11px] text-text-muted uppercase tracking-wide">{label}</p>
+      <p className={`text-[20px] md:text-[24px] font-semibold ${color}`}>{value}</p>
+    </div>
+  )
+}
+
+// ==================== Account Strip ====================
 
 const PROVIDER_COLORS: Record<string, string> = {
   ccxt: 'bg-accent',
   alpaca: 'bg-green',
 }
 
-function AccountCard({ account }: { account: AccountData }) {
-  const dotColor = PROVIDER_COLORS[account.provider] || 'bg-text-muted'
-
+function AccountStrip({ sources }: { sources: Array<{ id: string; label: string; provider: string; equity: number; unrealizedPnL: number; error?: string }> }) {
   return (
-    <div className="border border-border rounded-lg bg-bg-secondary p-4">
-      <div className="flex items-center gap-2 mb-3">
-        <div className={`w-2 h-2 rounded-full ${dotColor}`} />
-        <h3 className="text-[13px] font-semibold text-text">{account.label}</h3>
-        {account.error && <span className="text-[11px] text-text-muted ml-auto">{account.error}</span>}
-      </div>
-      {account.info ? (
-        <div className="grid grid-cols-2 gap-3">
-          <MetricItem label="Equity" value={fmt(account.info.equity)} />
-          <MetricItem label="Cash" value={fmt(account.info.cash)} />
-          <MetricItem label="Unrealized PnL" value={fmtPnl(account.info.unrealizedPnL)} pnl={account.info.unrealizedPnL} />
-          {account.info.portfolioValue != null && (
-            <MetricItem label="Portfolio Value" value={fmt(account.info.portfolioValue)} />
-          )}
-          {account.info.totalMargin != null && (
-            <MetricItem label="Total Margin" value={fmt(account.info.totalMargin)} />
-          )}
-          {account.info.realizedPnL !== 0 && (
-            <MetricItem label="Realized PnL" value={fmtPnl(account.info.realizedPnL)} pnl={account.info.realizedPnL} />
-          )}
-        </div>
-      ) : (
-        <p className="text-[12px] text-text-muted/60">No data available</p>
-      )}
-    </div>
-  )
-}
-
-function MetricItem({ label, value, pnl }: { label: string; value: string; pnl?: number }) {
-  const color = pnl == null ? 'text-text' : pnl >= 0 ? 'text-green' : 'text-red'
-  return (
-    <div>
-      <p className="text-[11px] text-text-muted">{label}</p>
-      <p className={`text-[14px] font-medium ${color}`}>{value}</p>
+    <div className="flex flex-wrap gap-2">
+      {sources.map(s => {
+        const dotColor = PROVIDER_COLORS[s.provider] || 'bg-text-muted'
+        return (
+          <div key={s.id} className="flex items-center gap-2 px-3 py-1.5 rounded-md border border-border bg-bg-secondary text-[12px]">
+            <div className={`w-1.5 h-1.5 rounded-full ${dotColor}`} />
+            <span className="text-text font-medium">{s.label}</span>
+            <span className="text-text-muted">{fmt(s.equity)}</span>
+            {s.unrealizedPnL !== 0 && (
+              <span className={s.unrealizedPnL >= 0 ? 'text-green' : 'text-red'}>
+                {fmtPnl(s.unrealizedPnL)}
+              </span>
+            )}
+            {s.error && <span className="text-text-muted/50">{s.error}</span>}
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -200,7 +233,7 @@ function PositionsTable({ positions }: { positions: PositionWithAccount[] }) {
       <h3 className="text-[13px] font-semibold text-text-muted uppercase tracking-wide mb-3">
         Positions
       </h3>
-      <div className="border border-border rounded-lg overflow-hidden">
+      <div className="border border-border rounded-lg overflow-x-auto">
         <table className="w-full text-[13px]">
           <thead>
             <tr className="bg-bg-secondary text-text-muted text-left">
@@ -210,6 +243,7 @@ function PositionsTable({ positions }: { positions: PositionWithAccount[] }) {
               <th className="px-3 py-2 font-medium text-right">Entry</th>
               <th className="px-3 py-2 font-medium text-right">Current</th>
               {hasLeverage && <th className="px-3 py-2 font-medium text-right">Lev</th>}
+              <th className="px-3 py-2 font-medium text-right">Cost Basis</th>
               <th className="px-3 py-2 font-medium text-right">Mkt Value</th>
               <th className="px-3 py-2 font-medium text-right">PnL</th>
               <th className="px-3 py-2 font-medium text-right">PnL %</th>
@@ -229,6 +263,7 @@ function PositionsTable({ positions }: { positions: PositionWithAccount[] }) {
                 <td className="px-3 py-2 text-right text-text-muted">{fmt(p.avgEntryPrice)}</td>
                 <td className="px-3 py-2 text-right text-text">{fmt(p.currentPrice)}</td>
                 {hasLeverage && <td className="px-3 py-2 text-right text-text-muted">{p.leverage}x</td>}
+                <td className="px-3 py-2 text-right text-text-muted">{fmt(p.costBasis)}</td>
                 <td className="px-3 py-2 text-right text-text">{fmt(p.marketValue)}</td>
                 <td className={`px-3 py-2 text-right font-medium ${p.unrealizedPnL >= 0 ? 'text-green' : 'text-red'}`}>
                   {fmtPnl(p.unrealizedPnL)}
@@ -255,7 +290,7 @@ interface CommitWithAccount extends WalletCommitLog {
 function TradeLog({ commits }: { commits: CommitWithAccount[] }) {
   const sorted = [...commits]
     .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-    .slice(0, 15)
+    .slice(0, 10)
 
   if (sorted.length === 0) return null
 

@@ -91,7 +91,7 @@ export class AccountManager {
   // ---- Cross-account aggregation ----
 
   async getAggregatedEquity(): Promise<AggregatedEquity> {
-    const results = await Promise.all(
+    const settled = await Promise.allSettled(
       Array.from(this.entries.values()).map(async ({ account }) => {
         const info = await account.getAccount()
         return { id: account.id, label: account.label, info }
@@ -104,7 +104,12 @@ export class AccountManager {
     let totalRealizedPnL = 0
     const accounts: AggregatedEquity['accounts'] = []
 
-    for (const { id, label, info } of results) {
+    for (const result of settled) {
+      if (result.status === 'rejected') {
+        console.warn('getAggregatedEquity: account query failed, skipping:', result.reason)
+        continue
+      }
+      const { id, label, info } = result.value
       totalEquity += info.equity
       totalCash += info.cash
       totalUnrealizedPnL += info.unrealizedPnL
