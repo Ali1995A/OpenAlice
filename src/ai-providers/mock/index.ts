@@ -18,20 +18,21 @@
  *   expect(provider.askCalls).toHaveLength(0)
  */
 
-import type { AIProvider, ProviderEvent, ProviderResult, GenerateInput, GenerateOpts } from './types.js'
+import type { AIProvider, ProviderEvent, ProviderResult, GenerateOpts } from './types.js'
+import type { SessionEntry } from '../core/session.js'
 import type { MediaAttachment } from '../core/types.js'
 
 // ==================== Call Records ====================
 
 export interface MockAIProviderCall {
-  input: GenerateInput
+  entries: SessionEntry[]
+  prompt: string
   opts?: GenerateOpts
 }
 
 // ==================== Options ====================
 
 export interface MockAIProviderOpts {
-  inputKind?: 'text' | 'messages'
   providerTag?: 'vercel-ai' | 'claude-code' | 'agent-sdk'
   /** Text returned by ask(). Default: 'mock-ask-result'. */
   askResult?: string
@@ -40,7 +41,6 @@ export interface MockAIProviderOpts {
 // ==================== MockAIProvider ====================
 
 export class MockAIProvider implements AIProvider {
-  readonly inputKind: 'text' | 'messages'
   readonly providerTag: 'vercel-ai' | 'claude-code' | 'agent-sdk'
   readonly generateCalls: MockAIProviderCall[] = []
   readonly askCalls: string[] = []
@@ -50,7 +50,6 @@ export class MockAIProvider implements AIProvider {
     private events: ProviderEvent[],
     opts?: MockAIProviderOpts,
   ) {
-    this.inputKind = opts?.inputKind ?? 'messages'
     this.providerTag = opts?.providerTag ?? 'vercel-ai'
     this._askResult = opts?.askResult ?? 'mock-ask-result'
   }
@@ -60,8 +59,8 @@ export class MockAIProvider implements AIProvider {
     return { text: this._askResult, media: [] }
   }
 
-  async *generate(input: GenerateInput, opts?: GenerateOpts): AsyncIterable<ProviderEvent> {
-    this.generateCalls.push({ input, opts })
+  async *generate(entries: SessionEntry[], prompt: string, opts?: GenerateOpts): AsyncIterable<ProviderEvent> {
+    this.generateCalls.push({ entries, prompt, opts })
     for (const e of this.events) yield e
   }
 }

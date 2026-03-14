@@ -9,14 +9,16 @@
  */
 
 import { resolve } from 'node:path'
-import type { ProviderResult, ProviderEvent, AIProvider, GenerateInput, GenerateOpts } from '../types.js'
+import type { ProviderResult, ProviderEvent, AIProvider, GenerateOpts } from '../types.js'
+import type { SessionEntry } from '../../core/session.js'
 import type { ClaudeCodeConfig } from './types.js'
+import { toTextHistory } from '../../core/session.js'
+import { buildChatHistoryPrompt, DEFAULT_MAX_HISTORY } from '../utils.js'
 import { readAgentConfig } from '../../core/config.js'
 import { createChannel } from '../../core/async-channel.js'
 import { askClaudeCode } from './provider.js'
 
 export class ClaudeCodeProvider implements AIProvider {
-  readonly inputKind = 'text' as const
   readonly providerTag = 'claude-code' as const
 
   constructor(
@@ -39,8 +41,10 @@ export class ClaudeCodeProvider implements AIProvider {
     return { text: result.text, media: [] }
   }
 
-  async *generate(input: GenerateInput, opts?: GenerateOpts): AsyncGenerator<ProviderEvent> {
-    if (input.kind !== 'text') throw new Error('ClaudeCodeProvider expects text input')
+  async *generate(entries: SessionEntry[], prompt: string, opts?: GenerateOpts): AsyncGenerator<ProviderEvent> {
+    const maxHistory = opts?.maxHistoryEntries ?? DEFAULT_MAX_HISTORY
+    const textHistory = toTextHistory(entries).slice(-maxHistory)
+    const fullPrompt = buildChatHistoryPrompt(prompt, textHistory, opts?.historyPreamble)
 
     const config = await this.resolveConfig()
     const claudeCode: ClaudeCodeConfig = {
@@ -48,12 +52,12 @@ export class ClaudeCodeProvider implements AIProvider {
       ...(opts?.disabledTools?.length
         ? { disallowedTools: [...(config.disallowedTools ?? []), ...opts.disabledTools] }
         : {}),
-      systemPrompt: input.systemPrompt ?? this.systemPrompt,
+      systemPrompt: opts?.systemPrompt ?? this.systemPrompt,
     }
 
     const channel = createChannel<ProviderEvent>()
 
-    const resultPromise = askClaudeCode(input.prompt, {
+    const resultPromise = askClaudeCode(fullPrompt, {
       ...claudeCode,
       onToolUse: ({ id, name, input: toolInput }) => {
         channel.push({ type: 'tool_use', id, name, input: toolInput })

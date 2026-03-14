@@ -132,7 +132,6 @@ describe('StreamableResult', () => {
 describe('GenerateRouter', () => {
   function makeProvider(tag: AIProvider['providerTag']): AIProvider {
     return {
-      inputKind: tag === 'vercel-ai' ? 'messages' : 'text',
       providerTag: tag,
       ask: vi.fn(async () => ({ text: `from-${tag}`, media: [] })),
       async *generate() { yield { type: 'done' as const, result: { text: '', media: [] } } },

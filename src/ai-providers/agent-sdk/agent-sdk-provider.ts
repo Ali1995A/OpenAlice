@@ -10,15 +10,17 @@
 
 import { resolve } from 'node:path'
 import type { Tool } from 'ai'
-import type { ProviderResult, ProviderEvent, AIProvider, GenerateInput, GenerateOpts } from '../types.js'
+import type { ProviderResult, ProviderEvent, AIProvider, GenerateOpts } from '../types.js'
+import type { SessionEntry } from '../../core/session.js'
 import type { AgentSdkConfig, AgentSdkOverride } from './query.js'
+import { toTextHistory } from '../../core/session.js'
+import { buildChatHistoryPrompt, DEFAULT_MAX_HISTORY } from '../utils.js'
 import { readAgentConfig } from '../../core/config.js'
 import { createChannel } from '../../core/async-channel.js'
 import { askAgentSdk } from './query.js'
 import { buildAgentSdkMcpServer } from './tool-bridge.js'
 
 export class AgentSdkProvider implements AIProvider {
-  readonly inputKind = 'text' as const
   readonly providerTag = 'agent-sdk' as const
 
   constructor(
@@ -49,8 +51,10 @@ export class AgentSdkProvider implements AIProvider {
     return { text: result.text, media: [] }
   }
 
-  async *generate(input: GenerateInput, opts?: GenerateOpts): AsyncGenerator<ProviderEvent> {
-    if (input.kind !== 'text') throw new Error('AgentSdkProvider expects text input')
+  async *generate(entries: SessionEntry[], prompt: string, opts?: GenerateOpts): AsyncGenerator<ProviderEvent> {
+    const maxHistory = opts?.maxHistoryEntries ?? DEFAULT_MAX_HISTORY
+    const textHistory = toTextHistory(entries).slice(-maxHistory)
+    const fullPrompt = buildChatHistoryPrompt(prompt, textHistory, opts?.historyPreamble)
 
     const config = await this.resolveConfig()
     const agentSdkConfig: AgentSdkConfig = {
@@ -58,7 +62,7 @@ export class AgentSdkProvider implements AIProvider {
       ...(opts?.disabledTools?.length
         ? { disallowedTools: [...(config.disallowedTools ?? []), ...opts.disabledTools] }
         : {}),
-      systemPrompt: input.systemPrompt ?? this.systemPrompt,
+      systemPrompt: opts?.systemPrompt ?? this.systemPrompt,
     }
 
     const override: AgentSdkOverride | undefined = opts?.agentSdk
@@ -67,7 +71,7 @@ export class AgentSdkProvider implements AIProvider {
     const channel = createChannel<ProviderEvent>()
 
     const resultPromise = askAgentSdk(
-      input.prompt,
+      fullPrompt,
       {
         ...agentSdkConfig,
         onToolUse: ({ id, name, input: toolInput }) => {

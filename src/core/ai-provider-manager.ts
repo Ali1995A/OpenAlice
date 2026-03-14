@@ -11,7 +11,7 @@ import type { ProviderEvent, ProviderResult, AIProvider } from '../ai-providers/
 
 export type {
   ProviderEvent, ProviderResult, AIProvider,
-  GenerateInput, GenerateOpts,
+  GenerateOpts,
 } from '../ai-providers/types.js'
 
 // ==================== StreamableResult ====================

@@ -6,21 +6,21 @@
  *
  * Providers are slim data-source adapters; all shared logic lives here:
  *   - Session management (append, compact, read active)
- *   - Input format dispatch (text vs messages based on provider.inputKind)
  *   - Unified pipeline (logToolCall, stripImageData, extractMedia)
  *   - Message persistence (intermediate tool messages + final response)
+ *
+ * History serialization (text vs messages) is each provider's responsibility.
  */
 
 import type { AskOptions, ProviderResult, ProviderEvent, GenerateOpts } from './ai-provider-manager.js'
 import { GenerateRouter, StreamableResult } from './ai-provider-manager.js'
 import type { ISessionStore, ContentBlock } from './session.js'
-import { toTextHistory, toModelMessages } from './session.js'
 import type { CompactionConfig } from './compaction.js'
 import { compactIfNeeded } from './compaction.js'
 import type { MediaAttachment } from './types.js'
 import { extractMediaFromToolResultContent } from './media.js'
 import { persistMedia } from './media-store.js'
-import { logToolCall, stripImageData, buildChatHistoryPrompt, DEFAULT_MAX_HISTORY } from '../ai-providers/utils.js'
+import { logToolCall, stripImageData, DEFAULT_MAX_HISTORY } from '../ai-providers/utils.js'
 
 // ==================== Types ====================
 
@@ -65,9 +65,6 @@ export class AgentCenter {
     session: ISessionStore,
     opts?: AskOptions,
   ): AsyncGenerator<ProviderEvent> {
-    const maxHistory = opts?.maxHistoryEntries ?? this.defaultMaxHistory
-    const preamble = opts?.historyPreamble ?? this.defaultPreamble
-
     // 1. Append user message to session
     await session.appendUser(prompt, 'human')
 
@@ -86,28 +83,16 @@ export class AgentCenter {
     // 4. Read active window
     const entries = compactionResult.activeEntries ?? await session.readActive()
 
-    // 5. Build input based on provider.inputKind
+    // 5. Delegate to provider — each provider decides how to serialize history
     const genOpts: GenerateOpts = {
+      systemPrompt: opts?.systemPrompt,
+      historyPreamble: opts?.historyPreamble ?? this.defaultPreamble,
+      maxHistoryEntries: opts?.maxHistoryEntries ?? this.defaultMaxHistory,
       disabledTools: opts?.disabledTools,
       vercelAiSdk: opts?.vercelAiSdk,
       agentSdk: opts?.agentSdk,
     }
-
-    let source: AsyncIterable<ProviderEvent>
-    if (provider.inputKind === 'text') {
-      const textHistory = toTextHistory(entries).slice(-maxHistory)
-      const fullPrompt = buildChatHistoryPrompt(prompt, textHistory, preamble)
-      source = provider.generate(
-        { kind: 'text', prompt: fullPrompt, systemPrompt: opts?.systemPrompt },
-        genOpts,
-      )
-    } else {
-      const messages = toModelMessages(entries)
-      source = provider.generate(
-        { kind: 'messages', messages, systemPrompt: opts?.systemPrompt },
-        genOpts,
-      )
-    }
+    const source = provider.generate(entries, prompt, genOpts)
 
     // 6. Consume provider events — unified pipeline
     const media: MediaAttachment[] = []

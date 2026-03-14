@@ -92,9 +92,8 @@ describe('VercelAIProvider — per-request overrides', () => {
     mockCreateAgent.mockReturnValue(makeAgent() as any)
 
     // generate with disabledTools
-    const input = { kind: 'messages' as const, messages: [] }
     const events = []
-    for await (const e of provider.generate(input, { disabledTools: ['toolB'] })) {
+    for await (const e of provider.generate([], 'test', { disabledTools: ['toolB'] })) {
       events.push(e)
     }
 
@@ -113,8 +112,7 @@ describe('VercelAIProvider — per-request overrides', () => {
     mockCreateModelFromConfig.mockResolvedValue({ model: {} as any, key: 'gpt-4o' })
     mockCreateAgent.mockReturnValue(makeAgent() as any)
 
-    const input = { kind: 'messages' as const, messages: [] }
-    for await (const _ of provider.generate(input, { vercelAiSdk: { modelId: 'claude-3-7' } as any })) {
+    for await (const _ of provider.generate([], 'test', { vercelAiSdk: { modelId: 'claude-3-7' } as any })) {
       // drain
     }
 
@@ -122,20 +120,13 @@ describe('VercelAIProvider — per-request overrides', () => {
   })
 })
 
-// ==================== generate() input validation ====================
+// ==================== generate() behavior ====================
 
-describe('VercelAIProvider — generate() input', () => {
+describe('VercelAIProvider — generate()', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockCreateModelFromConfig.mockResolvedValue({ model: {} as any, key: 'gpt-4o' })
     mockCreateAgent.mockReturnValue(makeAgent() as any)
-  })
-
-  it('throws when input.kind is not "messages"', async () => {
-    const provider = makeProvider()
-    const input = { kind: 'text' as any, text: 'hello' }
-    const gen = provider.generate(input)
-    await expect(gen.next()).rejects.toThrow('expects messages input')
   })
 
   it('yields done event with text from result', async () => {
@@ -143,9 +134,8 @@ describe('VercelAIProvider — generate() input', () => {
     const agent = makeAgent('final answer')
     mockCreateAgent.mockReturnValue(agent as any)
 
-    const input = { kind: 'messages' as const, messages: [] }
     const events = []
-    for await (const e of provider.generate(input)) {
+    for await (const e of provider.generate([], 'test')) {
       events.push(e)
     }
 
@@ -158,9 +148,8 @@ describe('VercelAIProvider — generate() input', () => {
     mockCreateAgent.mockReturnValue(agent as any)
     const provider = makeProvider()
 
-    const input = { kind: 'messages' as const, messages: [] }
     await expect(async () => {
-      for await (const _ of provider.generate(input)) {
+      for await (const _ of provider.generate([], 'test')) {
         // drain
       }
     }).rejects.toThrow('model error')
