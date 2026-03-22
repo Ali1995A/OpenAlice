@@ -540,6 +540,22 @@ export class CcxtBroker implements IBroker<CcxtBrokerMeta> {
     }
   }
 
+  // ---- Contract identity ----
+
+  getNativeKey(contract: Contract): string {
+    return contract.localSymbol || contract.symbol
+  }
+
+  resolveNativeKey(nativeKey: string): Contract {
+    const market = this.markets[nativeKey]
+    if (market) return marketToContract(market, this.exchange.id)
+    // Fallback: construct minimal contract from symbol string
+    const c = new Contract()
+    c.localSymbol = nativeKey
+    c.symbol = nativeKey.split('/')[0] ?? nativeKey
+    return c
+  }
+
   // ---- Provider-specific methods ----
 
   async getFundingRate(contract: Contract): Promise<FundingRate> {

@@ -334,9 +334,9 @@ export class UnifiedTradingAccount {
 
   // ==================== aliceId management ====================
 
-  /** Construct aliceId: "{utaId}|{nativeKey}" */
+  /** Construct aliceId: "{utaId}|{nativeKey}" using broker's native identity. */
   private stampAliceId(contract: Contract): void {
-    const nativeKey = contract.localSymbol || contract.symbol || ''
+    const nativeKey = this.broker.getNativeKey(contract)
     contract.aliceId = `${this.id}|${nativeKey}`
   }
 
@@ -350,14 +350,12 @@ export class UnifiedTradingAccount {
   // ==================== Stage operations ====================
 
   stagePlaceOrder(params: StagePlaceOrderParams): AddResult {
-    const contract = new Contract()
-    contract.aliceId = params.aliceId
-    // Extract nativeKey from aliceId for broker resolution
+    // Resolve aliceId → full contract via broker (fills secType, exchange, currency, conId, etc.)
     const parsed = UnifiedTradingAccount.parseAliceId(params.aliceId)
-    if (parsed) {
-      contract.symbol = parsed.nativeKey
-      contract.localSymbol = parsed.nativeKey
-    }
+    const contract = parsed
+      ? this.broker.resolveNativeKey(parsed.nativeKey)
+      : new Contract()
+    contract.aliceId = params.aliceId
     if (params.symbol) contract.symbol = params.symbol
 
     const order = new Order()
@@ -394,13 +392,11 @@ export class UnifiedTradingAccount {
   }
 
   stageClosePosition(params: StageClosePositionParams): AddResult {
-    const contract = new Contract()
-    contract.aliceId = params.aliceId
     const parsed = UnifiedTradingAccount.parseAliceId(params.aliceId)
-    if (parsed) {
-      contract.symbol = parsed.nativeKey
-      contract.localSymbol = parsed.nativeKey
-    }
+    const contract = parsed
+      ? this.broker.resolveNativeKey(parsed.nativeKey)
+      : new Contract()
+    contract.aliceId = params.aliceId
     if (params.symbol) contract.symbol = params.symbol
 
     return this.git.add({

@@ -386,6 +386,19 @@ export class MockBroker implements IBroker {
     return DEFAULT_CAPABILITIES
   }
 
+  // ==================== Contract identity ====================
+
+  getNativeKey(contract: Contract): string {
+    return contract.symbol
+  }
+
+  resolveNativeKey(nativeKey: string): Contract {
+    const c = new Contract()
+    c.symbol = nativeKey
+    c.secType = 'STK'
+    return c
+  }
+
   // ==================== Test helpers ====================
 
   /** Inject a quote for a symbol. Used to control fill prices for market orders. */

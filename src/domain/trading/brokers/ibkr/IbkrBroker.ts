@@ -297,6 +297,29 @@ export class IbkrBroker implements IBroker {
     }
   }
 
+  // ==================== Contract identity ====================
+
+  getNativeKey(contract: Contract): string {
+    // conId is IBKR's globally unique contract identifier
+    if (contract.conId) return String(contract.conId)
+    return contract.symbol
+  }
+
+  resolveNativeKey(nativeKey: string): Contract {
+    const c = new Contract()
+    const asNum = parseInt(nativeKey, 10)
+    if (!isNaN(asNum) && String(asNum) === nativeKey) {
+      // Numeric nativeKey = conId — TWS resolves everything else from this
+      c.conId = asNum
+    } else {
+      // String nativeKey = symbol — fill in routing defaults
+      c.symbol = nativeKey
+      c.exchange = 'SMART'
+      c.currency = 'USD'
+    }
+    return c
+  }
+
   // ==================== Internal ====================
 
   private downloadAccount(): Promise<AccountDownloadResult> {

@@ -191,4 +191,14 @@ export interface IBroker<TMeta = unknown> {
   // ---- Capabilities ----
 
   getCapabilities(): AccountCapabilities
+
+  // ---- Contract identity ----
+
+  /** Extract the broker-native unique key from a contract (for aliceId construction).
+   *  Each broker defines its own uniqueness: Alpaca = ticker, CCXT = unified symbol, IBKR = conId. */
+  getNativeKey(contract: Contract): string
+
+  /** Reconstruct a trade-ready contract from a nativeKey (for aliceId resolution).
+   *  Broker fills in secType, exchange, currency, conId, etc. as needed. */
+  resolveNativeKey(nativeKey: string): Contract
 }

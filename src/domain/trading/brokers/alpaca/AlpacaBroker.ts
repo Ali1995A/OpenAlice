@@ -367,6 +367,16 @@ export class AlpacaBroker implements IBroker {
   }
 
 
+  // ---- Contract identity ----
+
+  getNativeKey(contract: Contract): string {
+    return contract.symbol
+  }
+
+  resolveNativeKey(nativeKey: string): Contract {
+    return makeContract(nativeKey)
+  }
+
   // ---- Internal ----
 
   private mapOpenOrder(o: AlpacaOrderRaw): OpenOrder {
