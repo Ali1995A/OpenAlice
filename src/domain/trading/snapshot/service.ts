@@ -1,7 +1,10 @@
 /**
  * Snapshot service — orchestrates builder + store.
  *
- * Errors are caught and logged — snapshots must never break trading operations.
+ * Only persists snapshots with real data. If the builder returns null
+ * (offline, network error), the snapshot is skipped — never stored.
+ * takeAllSnapshots retries failed accounts once after a short delay.
+ *
  * Store instances are cached per account to ensure writes are serialized.
  */
 
@@ -11,6 +14,8 @@ import type { SnapshotStore } from './store.js'
 import type { UTASnapshot, SnapshotTrigger } from './types.js'
 import { buildSnapshot } from './builder.js'
 import { createSnapshotStore } from './store.js'
+
+const RETRY_DELAY_MS = 3_000
 
 export interface SnapshotService {
   takeSnapshot(accountId: string, trigger: SnapshotTrigger): Promise<UTASnapshot | null>
@@ -41,6 +46,17 @@ export function createSnapshotService(deps: {
 
       try {
         const snapshot = await buildSnapshot(uta, trigger)
+
+        if (!snapshot) {
+          // Builder couldn't get real data — skip, don't store
+          await eventLog?.append('snapshot.skipped', {
+            accountId,
+            trigger,
+            reason: 'no-data',
+          }).catch(() => {})
+          return null
+        }
+
         await getStore(accountId).append(snapshot)
         await eventLog?.append('snapshot.taken', {
           accountId,
@@ -58,8 +74,27 @@ export function createSnapshotService(deps: {
 
     async takeAllSnapshots(trigger) {
       const accounts = accountManager.resolve()
+
+      // First round — try all accounts
+      const results = await Promise.allSettled(
+        accounts.map(async uta => ({
+          id: uta.id,
+          snap: await this.takeSnapshot(uta.id, trigger),
+        })),
+      )
+
+      // Collect failed account IDs (returned null)
+      const failed = results
+        .filter((r): r is PromiseFulfilledResult<{ id: string; snap: UTASnapshot | null }> =>
+          r.status === 'fulfilled' && r.value.snap === null)
+        .map(r => r.value.id)
+
+      if (failed.length === 0) return
+
+      // Retry once after a short delay
+      await new Promise(r => setTimeout(r, RETRY_DELAY_MS))
       await Promise.allSettled(
-        accounts.map(uta => this.takeSnapshot(uta.id, trigger)),
+        failed.map(id => this.takeSnapshot(id, trigger)),
       )
     },
 

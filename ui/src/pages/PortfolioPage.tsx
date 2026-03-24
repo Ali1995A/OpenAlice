@@ -455,6 +455,14 @@ function TradeLog({ commits }: { commits: CommitWithAccount[] }) {
 
 // ==================== Snapshot Settings ====================
 
+const INTERVAL_PRESETS = [
+  { label: '1m', value: '1m' },
+  { label: '5m', value: '5m' },
+  { label: '15m', value: '15m' },
+  { label: '30m', value: '30m' },
+  { label: '1h', value: '1h' },
+]
+
 function SnapshotSettings({ enabled, every, onEnabledChange, onEveryChange, saveStatus }: {
   enabled: boolean
   every: string
@@ -462,17 +470,46 @@ function SnapshotSettings({ enabled, every, onEnabledChange, onEveryChange, save
   onEveryChange: (v: string) => void
   saveStatus: string
 }) {
+  const isPreset = INTERVAL_PRESETS.some(p => p.value === every)
+  const [showCustom, setShowCustom] = useState(!isPreset)
+
   return (
     <div className="flex items-center gap-3 text-[12px] text-text-muted">
       <span className="font-medium uppercase tracking-wide">Snapshots</span>
       <Toggle checked={enabled} onChange={onEnabledChange} size="sm" />
-      <span>every</span>
-      <input
-        className="w-16 px-1.5 py-0.5 rounded border border-border bg-bg text-text text-[12px] text-center"
-        value={every}
-        onChange={(e) => onEveryChange(e.target.value)}
-        placeholder="15m"
-      />
+      <div className="flex gap-0.5">
+        {INTERVAL_PRESETS.map(p => (
+          <button
+            key={p.value}
+            onClick={() => { onEveryChange(p.value); setShowCustom(false) }}
+            className={`px-2 py-0.5 text-[11px] rounded transition-colors ${
+              every === p.value && !showCustom
+                ? 'bg-accent/20 text-accent font-medium'
+                : 'hover:text-text hover:bg-bg-tertiary'
+            }`}
+          >
+            {p.label}
+          </button>
+        ))}
+        <button
+          onClick={() => setShowCustom(true)}
+          className={`px-2 py-0.5 text-[11px] rounded transition-colors ${
+            showCustom
+              ? 'bg-accent/20 text-accent font-medium'
+              : 'hover:text-text hover:bg-bg-tertiary'
+          }`}
+        >
+          Custom
+        </button>
+      </div>
+      {showCustom && (
+        <input
+          className="w-16 px-1.5 py-0.5 rounded border border-border bg-bg text-text text-[12px] text-center"
+          value={every}
+          onChange={(e) => onEveryChange(e.target.value)}
+          placeholder="e.g. 2h"
+        />
+      )}
       {saveStatus === 'saving' && <span className="text-accent text-[10px]">saving...</span>}
       {saveStatus === 'error' && <span className="text-red text-[10px]">save failed</span>}
     </div>

@@ -128,77 +128,66 @@ describe('Snapshot Builder', () => {
   })
 
   // #5
-  it('returns partial snapshot when UTA is disabled', async () => {
-    // Simulate disabled by making broker throw permanent error on init
+  it('returns null when UTA is disabled', async () => {
     broker.setPositions([makePosition()])
-    // Access private field to simulate disabled state
     ;(uta as any)._disabled = true
 
     const snap = await buildSnapshot(uta, 'scheduled')
-
-    expect(snap.health).toBe('disabled')
-    expect(snap.positions).toHaveLength(0)
-    expect(snap.openOrders).toHaveLength(0)
-    expect(snap.account.netLiquidation).toBe('0')
+    expect(snap).toBeNull()
   })
 
   // #6
-  it('returns partial snapshot when UTA is offline', async () => {
-    // Force offline by setting enough consecutive failures
+  it('returns null when UTA is offline', async () => {
     ;(uta as any)._consecutiveFailures = 6
 
     const snap = await buildSnapshot(uta, 'scheduled')
-
-    expect(snap.health).toBe('offline')
-    expect(snap.positions).toHaveLength(0)
-    expect(snap.openOrders).toHaveLength(0)
+    expect(snap).toBeNull()
   })
 
   // #7
-  it('returns partial snapshot when broker query throws', async () => {
-    broker.setFailMode(3) // Next 3 calls throw
+  it('returns null when broker query throws', async () => {
+    broker.setFailMode(3)
 
     const snap = await buildSnapshot(uta, 'manual')
-
-    // Health was 'healthy' at capture time (before broker call), should be preserved
-    expect(snap.health).toBe('healthy')
-    expect(snap.positions).toHaveLength(0)
-    expect(snap.account.netLiquidation).toBe('0')
+    expect(snap).toBeNull()
   })
 
   // #8
   it('captures headCommit and pendingCommits from git status', async () => {
     // No commits yet
     let snap = await buildSnapshot(uta, 'manual')
-    expect(snap.headCommit).toBeNull()
-    expect(snap.pendingCommits).toEqual([])
+    expect(snap).not.toBeNull()
+    expect(snap!.headCommit).toBeNull()
+    expect(snap!.pendingCommits).toEqual([])
 
     // Stage and commit (but don't push)
     uta.git.add({ action: 'placeOrder', contract: makeContract(), order: new Order() })
     const { hash } = uta.git.commit('test order')
 
     snap = await buildSnapshot(uta, 'manual')
-    expect(snap.pendingCommits).toEqual([hash])
-    expect(snap.headCommit).toBeNull() // not pushed yet
+    expect(snap).not.toBeNull()
+    expect(snap!.pendingCommits).toEqual([hash])
+    expect(snap!.headCommit).toBeNull() // not pushed yet
   })
 
   // #9
   it('passes trigger field correctly', async () => {
     for (const trigger of ['scheduled', 'post-push', 'post-reject', 'manual'] as const) {
       const snap = await buildSnapshot(uta, trigger)
-      expect(snap.trigger).toBe(trigger)
+      expect(snap).not.toBeNull()
+      expect(snap!.trigger).toBe(trigger)
     }
   })
 
   // #10
   it('omits optional fields when not available', async () => {
-    // MockBroker default includes buyingPower but not margin fields
     broker.setAccountInfo({ buyingPower: undefined, initMarginReq: undefined })
     const snap = await buildSnapshot(uta, 'manual')
+    expect(snap).not.toBeNull()
 
-    expect(snap.account.buyingPower).toBeUndefined()
-    expect(snap.account.initMarginReq).toBeUndefined()
-    expect(snap.account.maintMarginReq).toBeUndefined()
+    expect(snap!.account.buyingPower).toBeUndefined()
+    expect(snap!.account.initMarginReq).toBeUndefined()
+    expect(snap!.account.maintMarginReq).toBeUndefined()
   })
 })
 
@@ -230,16 +219,11 @@ describe('Snapshot Store', () => {
 
   beforeEach(() => {
     dir = tempDir()
-    // Override BASE_DIR by creating store with a unique account path
-    const accountId = `test-${randomUUID()}`
-    // We need to use the real createSnapshotStore but with a temp dir
-    // Since BASE_DIR is hardcoded, we'll use a unique accountId instead
-    store = createSnapshotStore(accountId)
-    // Override the internal dir — we'll work with what we have
+    store = createSnapshotStore('test-acc', { baseDir: dir })
   })
 
   afterEach(async () => {
-    // Cleanup is handled by unique accountIds in data/trading/
+    await rm(dir, { recursive: true, force: true })
   })
 
   // #11
@@ -397,17 +381,17 @@ describe('Snapshot Service', () => {
   })
 
   // #22
-  it('catches builder errors and logs snapshot.error', async () => {
-    // Make broker fail
+  it('returns null and logs snapshot.skipped when builder fails', async () => {
     const uta = manager.get('acc1')!
     vi.spyOn(uta, 'getAccount').mockRejectedValue(new Error('network timeout'))
 
     const snap = await service.takeSnapshot('acc1', 'scheduled')
 
-    // Should still return a snapshot (partial, from builder catch)
-    // or null if service itself catches
-    // The builder catches and returns partial, so service should succeed
-    expect(snap).not.toBeNull()
+    expect(snap).toBeNull()
+    // Should log skipped, not store anything
+    const skipped = eventLog.recent({ type: 'snapshot.skipped' })
+    expect(skipped).toHaveLength(1)
+    expect(skipped[0].payload).toMatchObject({ accountId: 'acc1', reason: 'no-data' })
   })
 
   // #23
@@ -429,14 +413,19 @@ describe('Snapshot Service', () => {
     const broker2 = new MockBroker({ id: 'acc2', label: 'Failing' })
     const uta2 = new UnifiedTradingAccount(broker2)
     manager.add(uta2)
-    // Make uta2 disabled so it returns partial
+    // Make uta2 disabled — builder returns null, not stored
     ;(uta2 as any)._disabled = true
 
     await service.takeAllSnapshots('scheduled')
 
-    // Both should have events (acc2 gets a partial snapshot)
-    const events = eventLog.recent({ type: 'snapshot.taken' })
-    expect(events).toHaveLength(2)
+    // Only acc1 gets stored; acc2 is skipped (disabled → null)
+    const taken = eventLog.recent({ type: 'snapshot.taken' })
+    expect(taken).toHaveLength(1)
+    expect((taken[0].payload as any).accountId).toBe('acc1')
+
+    // acc2 should be skipped
+    const skipped = eventLog.recent({ type: 'snapshot.skipped' })
+    expect(skipped.length).toBeGreaterThanOrEqual(1)
   })
 
   // #25

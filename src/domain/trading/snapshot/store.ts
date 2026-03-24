@@ -20,15 +20,19 @@ import { resolve } from 'node:path'
 import type { UTASnapshot, SnapshotIndex } from './types.js'
 
 const CHUNK_SIZE = 50
-const BASE_DIR = 'data/trading'
+const DEFAULT_BASE_DIR = 'data/trading'
+
+export interface SnapshotStoreOptions {
+  baseDir?: string
+}
 
 export interface SnapshotStore {
   append(snapshot: UTASnapshot): Promise<void>
   readRange(opts?: { startTime?: string; endTime?: string; limit?: number }): Promise<UTASnapshot[]>
 }
 
-export function createSnapshotStore(accountId: string): SnapshotStore {
-  const dir = resolve(BASE_DIR, accountId, 'snapshots')
+export function createSnapshotStore(accountId: string, options?: SnapshotStoreOptions): SnapshotStore {
+  const dir = resolve(options?.baseDir ?? DEFAULT_BASE_DIR, accountId, 'snapshots')
   const indexPath = resolve(dir, 'index.json')
 
   // Serialize writes to prevent concurrent append from corrupting the index

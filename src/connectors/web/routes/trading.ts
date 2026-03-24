@@ -215,14 +215,27 @@ export function createTradingRoutes(ctx: EngineContext) {
         }
       }
 
-      // Sort chronologically and format
-      const points = Array.from(timeMap.entries())
+      // Sort chronologically
+      const sorted = Array.from(timeMap.entries())
         .sort((a, b) => a[0].localeCompare(b[0]))
-        .map(([timestamp, { equity, accounts }]) => ({
-          timestamp,
-          equity: String(equity),
-          accounts,
-        }))
+
+      // Carry forward: fill missing accounts with their last known value
+      const allAccountIds = accounts.map(a => a.id)
+      const lastKnown: Record<string, string> = {}
+
+      const points = sorted.map(([timestamp, { accounts: accs }]) => {
+        // Fill missing accounts from last known
+        for (const id of allAccountIds) {
+          if (!(id in accs) && id in lastKnown) {
+            accs[id] = lastKnown[id]
+          }
+        }
+        // Update last known
+        Object.assign(lastKnown, accs)
+        // Recalculate equity with filled values
+        const equity = Object.values(accs).reduce((s, v) => s + (Number(v) || 0), 0)
+        return { timestamp, equity: String(equity), accounts: accs }
+      })
 
       return c.json({ points })
     } catch {

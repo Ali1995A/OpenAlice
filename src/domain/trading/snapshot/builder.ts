@@ -1,8 +1,9 @@
 /**
  * Snapshot builder — assembles a UTASnapshot from a live UTA.
  *
- * Calls through public UTA methods so health tracking and error handling apply.
- * On failure (offline/disabled UTA), returns a partial snapshot with empty collections.
+ * Only returns a snapshot when real data is successfully fetched.
+ * Returns null when data cannot be obtained (offline, disabled, network error).
+ * Never fabricates zero-value placeholders.
  */
 
 import type { UnifiedTradingAccount } from '../UnifiedTradingAccount.js'
@@ -11,34 +12,9 @@ import type { UTASnapshot, SnapshotTrigger } from './types.js'
 export async function buildSnapshot(
   uta: UnifiedTradingAccount,
   trigger: SnapshotTrigger,
-): Promise<UTASnapshot> {
-  const timestamp = new Date().toISOString()
-  const health = uta.disabled ? 'disabled' as const : uta.health
-
-  // Git state — always available regardless of broker health
-  const gitStatus = uta.git.status()
-  const headCommit = gitStatus.head
-  const pendingCommits = gitStatus.pendingHash ? [gitStatus.pendingHash] : []
-
-  // If unhealthy, return partial snapshot without querying broker
-  if (health === 'offline' || health === 'disabled') {
-    return {
-      accountId: uta.id,
-      timestamp,
-      trigger,
-      account: {
-        netLiquidation: '0',
-        totalCashValue: '0',
-        unrealizedPnL: '0',
-        realizedPnL: '0',
-      },
-      positions: [],
-      openOrders: [],
-      health,
-      headCommit,
-      pendingCommits,
-    }
-  }
+): Promise<UTASnapshot | null> {
+  // Can't get real data from offline/disabled accounts
+  if (uta.disabled || uta.health === 'offline') return null
 
   try {
     const pendingOrderIds = uta.git.getPendingOrderIds().map(p => p.orderId)
@@ -48,9 +24,11 @@ export async function buildSnapshot(
       uta.getOrders(pendingOrderIds),
     ])
 
+    const gitStatus = uta.git.status()
+
     return {
       accountId: uta.id,
-      timestamp,
+      timestamp: new Date().toISOString(),
       trigger,
       account: {
         netLiquidation: String(accountInfo.netLiquidation),
@@ -83,28 +61,12 @@ export async function buildSnapshot(
           status: o.orderState.status,
           avgFillPrice: o.avgFillPrice != null ? String(o.avgFillPrice) : undefined,
         })),
-      health,
-      headCommit,
-      pendingCommits,
+      health: uta.disabled ? 'disabled' : uta.health,
+      headCommit: gitStatus.head,
+      pendingCommits: gitStatus.pendingHash ? [gitStatus.pendingHash] : [],
     }
   } catch (err) {
-    // Broker query failed — return partial snapshot
     console.warn(`snapshot: build failed for ${uta.id}:`, err instanceof Error ? err.message : err)
-    return {
-      accountId: uta.id,
-      timestamp,
-      trigger,
-      account: {
-        netLiquidation: '0',
-        totalCashValue: '0',
-        unrealizedPnL: '0',
-        realizedPnL: '0',
-      },
-      positions: [],
-      openOrders: [],
-      health,
-      headCommit,
-      pendingCommits,
-    }
+    return null
   }
 }
