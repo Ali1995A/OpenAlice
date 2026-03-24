@@ -1,7 +1,7 @@
 export { createSnapshotService } from './service.js'
 export type { SnapshotService } from './service.js'
 export { createSnapshotScheduler } from './scheduler.js'
-export type { SnapshotScheduler } from './scheduler.js'
+export type { SnapshotScheduler, SnapshotConfig } from './scheduler.js'
 export { createSnapshotStore } from './store.js'
 export type { SnapshotStore } from './store.js'
 export { buildSnapshot } from './builder.js'

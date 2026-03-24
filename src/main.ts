@@ -228,9 +228,11 @@ async function main() {
 
   // ==================== Snapshot Scheduler ====================
 
-  const snapshotScheduler = createSnapshotScheduler({ snapshotService, cronEngine, eventLog })
+  const snapshotScheduler = createSnapshotScheduler({ snapshotService, cronEngine, eventLog, config: config.snapshot })
   await snapshotScheduler.start()
-  console.log('snapshot: scheduler started (every 15m)')
+  if (config.snapshot.enabled) {
+    console.log(`snapshot: scheduler started (every ${config.snapshot.every})`)
+  }
 
   // ==================== Heartbeat ====================
 

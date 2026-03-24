@@ -79,6 +79,10 @@ export interface AppConfig {
     prompt: string
     activeHours: { start: string; end: string; timezone: string } | null
   }
+  snapshot: {
+    enabled: boolean
+    every: string
+  }
   connectors: ConnectorsConfig
   [key: string]: unknown
 }

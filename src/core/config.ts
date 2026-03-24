@@ -164,6 +164,11 @@ const heartbeatSchema = z.object({
   activeHours: activeHoursSchema,
 })
 
+const snapshotSchema = z.object({
+  enabled: z.boolean().default(true),
+  every: z.string().default('15m'),
+})
+
 export const toolsSchema = z.object({
   /** Tool names that are disabled. Tools not listed are enabled by default. */
   disabled: z.array(z.string()).default([]),
@@ -236,6 +241,7 @@ export type Config = {
   compaction: z.infer<typeof compactionSchema>
   aiProvider: z.infer<typeof aiProviderSchema>
   heartbeat: z.infer<typeof heartbeatSchema>
+  snapshot: z.infer<typeof snapshotSchema>
   connectors: z.infer<typeof connectorsSchema>
   news: z.infer<typeof newsCollectorSchema>
   tools: z.infer<typeof toolsSchema>
@@ -271,7 +277,7 @@ async function parseAndSeed<T>(filename: string, schema: z.ZodType<T>, raw: unkn
 }
 
 export async function loadConfig(): Promise<Config> {
-  const files = ['engine.json', 'agent.json', 'crypto.json', 'securities.json', 'market-data.json', 'compaction.json', 'ai-provider-manager.json', 'heartbeat.json', 'connectors.json', 'news.json', 'tools.json'] as const
+  const files = ['engine.json', 'agent.json', 'crypto.json', 'securities.json', 'market-data.json', 'compaction.json', 'ai-provider-manager.json', 'heartbeat.json', 'snapshot.json', 'connectors.json', 'news.json', 'tools.json'] as const
   const raws = await Promise.all(files.map((f) => loadJsonFile(f)))
 
   // TODO: remove all migration blocks before v1.0 — no stable release yet, breaking changes are fine
@@ -304,7 +310,7 @@ export async function loadConfig(): Promise<Config> {
   }
 
   // ---------- Migration: consolidate old telegram.json + engine port fields ----------
-  const connectorsRaw = raws[8] as Record<string, unknown> | undefined
+  const connectorsRaw = raws[9] as Record<string, unknown> | undefined
   if (connectorsRaw === undefined) {
     const oldTelegram = await loadJsonFile('telegram.json')
     const oldEngine = raws[0] as Record<string, unknown> | undefined
@@ -321,7 +327,7 @@ export async function loadConfig(): Promise<Config> {
       await mkdir(CONFIG_DIR, { recursive: true })
       await writeFile(resolve(CONFIG_DIR, 'engine.json'), JSON.stringify(cleanEngine, null, 2) + '\n')
     }
-    raws[8] = Object.keys(migrated).length > 0 ? migrated : undefined
+    raws[9] = Object.keys(migrated).length > 0 ? migrated : undefined
   }
 
   return {
@@ -333,9 +339,10 @@ export async function loadConfig(): Promise<Config> {
     compaction:    await parseAndSeed(files[5], compactionSchema, raws[5]),
     aiProvider:    await parseAndSeed(files[6], aiProviderSchema, raws[6]),
     heartbeat:     await parseAndSeed(files[7], heartbeatSchema, raws[7]),
-    connectors:    await parseAndSeed(files[8], connectorsSchema, raws[8]),
-    news:          await parseAndSeed(files[9], newsCollectorSchema, raws[9]),
-    tools:         await parseAndSeed(files[10], toolsSchema, raws[10]),
+    snapshot:      await parseAndSeed(files[8], snapshotSchema, raws[8]),
+    connectors:    await parseAndSeed(files[9], connectorsSchema, raws[9]),
+    news:          await parseAndSeed(files[10], newsCollectorSchema, raws[10]),
+    tools:         await parseAndSeed(files[11], toolsSchema, raws[11]),
   }
 }
 
@@ -455,6 +462,7 @@ const sectionSchemas: Record<ConfigSection, z.ZodTypeAny> = {
   compaction: compactionSchema,
   aiProvider: aiProviderSchema,
   heartbeat: heartbeatSchema,
+  snapshot: snapshotSchema,
   connectors: connectorsSchema,
   news: newsCollectorSchema,
   tools: toolsSchema,
@@ -469,6 +477,7 @@ const sectionFiles: Record<ConfigSection, string> = {
   compaction: 'compaction.json',
   aiProvider: 'ai-provider-manager.json',
   heartbeat: 'heartbeat.json',
+  snapshot: 'snapshot.json',
   connectors: 'connectors.json',
   news: 'news.json',
   tools: 'tools.json',

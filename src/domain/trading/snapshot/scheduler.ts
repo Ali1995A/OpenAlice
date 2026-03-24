@@ -12,7 +12,11 @@ import type { CronEngine, CronFirePayload } from '../../../task/cron/engine.js'
 import type { SnapshotService } from './service.js'
 
 const SNAPSHOT_JOB_NAME = '__snapshot__'
-const DEFAULT_INTERVAL = '15m'
+
+export interface SnapshotConfig {
+  enabled: boolean
+  every: string
+}
 
 export interface SnapshotScheduler {
   start(): Promise<void>
@@ -23,8 +27,9 @@ export function createSnapshotScheduler(deps: {
   snapshotService: SnapshotService
   cronEngine: CronEngine
   eventLog: EventLog
+  config: SnapshotConfig
 }): SnapshotScheduler {
-  const { snapshotService, cronEngine, eventLog } = deps
+  const { snapshotService, cronEngine, eventLog, config } = deps
 
   let unsubscribe: (() => void) | null = null
   let processing = false
@@ -50,15 +55,15 @@ export function createSnapshotScheduler(deps: {
       const existing = cronEngine.list().find(j => j.name === SNAPSHOT_JOB_NAME)
       if (existing) {
         await cronEngine.update(existing.id, {
-          schedule: { kind: 'every', every: DEFAULT_INTERVAL },
-          enabled: true,
+          schedule: { kind: 'every', every: config.every },
+          enabled: config.enabled,
         })
       } else {
         await cronEngine.add({
           name: SNAPSHOT_JOB_NAME,
-          schedule: { kind: 'every', every: DEFAULT_INTERVAL },
+          schedule: { kind: 'every', every: config.every },
           payload: '',
-          enabled: true,
+          enabled: config.enabled,
         })
       }
 

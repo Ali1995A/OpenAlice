@@ -1,10 +1,12 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { api, type Position, type WalletCommitLog, type EquityCurvePoint, type UTASnapshotSummary } from '../api'
+import { useAutoSave } from '../hooks/useAutoSave'
 import { useAccountHealth } from '../hooks/useAccountHealth'
 import { PageHeader } from '../components/PageHeader'
 import { EmptyState } from '../components/StateViews'
 import { EquityCurve } from '../components/EquityCurve'
 import { SnapshotDetail } from '../components/SnapshotDetail'
+import { Toggle } from '../components/Toggle'
 
 // ==================== Types ====================
 
@@ -42,15 +44,28 @@ export function PortfolioPage() {
   const [curvePoints, setCurvePoints] = useState<EquityCurvePoint[]>([])
   const [selectedTimestamp, setSelectedTimestamp] = useState<string | null>(null)
   const [selectedSnapshot, setSelectedSnapshot] = useState<UTASnapshotSummary | null>(null)
+  const [snapshotEnabled, setSnapshotEnabled] = useState(true)
+  const [snapshotEvery, setSnapshotEvery] = useState('15m')
+
+  const snapshotConfig = useMemo(() => ({ enabled: snapshotEnabled, every: snapshotEvery }), [snapshotEnabled, snapshotEvery])
+  const saveSnapshotConfig = useCallback(async (d: Record<string, unknown>) => {
+    await api.config.updateSection('snapshot', d)
+  }, [])
+  const { status: snapshotSaveStatus } = useAutoSave({ data: snapshotConfig, save: saveSnapshotConfig })
 
   const refresh = useCallback(async () => {
     setLoading(true)
-    const [result, curveResult] = await Promise.all([
+    const [result, curveResult, configResult] = await Promise.all([
       fetchPortfolioData(),
       api.trading.equityCurve({ limit: 200 }).catch(() => ({ points: [] })),
+      api.config.load().catch(() => null),
     ])
     setData(result)
     setCurvePoints(curveResult.points)
+    if (configResult?.snapshot) {
+      setSnapshotEnabled(configResult.snapshot.enabled)
+      setSnapshotEvery(configResult.snapshot.every)
+    }
     setLastRefresh(new Date())
     setLoading(false)
   }, [])
@@ -124,6 +139,14 @@ export function PortfolioPage() {
               selectedTimestamp={selectedTimestamp}
             />
           )}
+
+          <SnapshotSettings
+            enabled={snapshotEnabled}
+            every={snapshotEvery}
+            onEnabledChange={setSnapshotEnabled}
+            onEveryChange={setSnapshotEvery}
+            saveStatus={snapshotSaveStatus}
+          />
 
           {selectedSnapshot && (
             <SnapshotDetail
@@ -424,6 +447,34 @@ function TradeLog({ commits }: { commits: CommitWithAccount[] }) {
           )
         })}
       </div>
+    </div>
+  )
+}
+
+// ==================== Formatting Helpers ====================
+
+// ==================== Snapshot Settings ====================
+
+function SnapshotSettings({ enabled, every, onEnabledChange, onEveryChange, saveStatus }: {
+  enabled: boolean
+  every: string
+  onEnabledChange: (v: boolean) => void
+  onEveryChange: (v: string) => void
+  saveStatus: string
+}) {
+  return (
+    <div className="flex items-center gap-3 text-[12px] text-text-muted">
+      <span className="font-medium uppercase tracking-wide">Snapshots</span>
+      <Toggle checked={enabled} onChange={onEnabledChange} size="sm" />
+      <span>every</span>
+      <input
+        className="w-16 px-1.5 py-0.5 rounded border border-border bg-bg text-text text-[12px] text-center"
+        value={every}
+        onChange={(e) => onEveryChange(e.target.value)}
+        placeholder="15m"
+      />
+      {saveStatus === 'saving' && <span className="text-accent text-[10px]">saving...</span>}
+      {saveStatus === 'error' && <span className="text-red text-[10px]">save failed</span>}
     </div>
   )
 }

@@ -475,6 +475,7 @@ describe('Snapshot Scheduler', () => {
       snapshotService: mockService,
       cronEngine,
       eventLog,
+      config: { enabled: true, every: '15m' },
     })
   })
 
